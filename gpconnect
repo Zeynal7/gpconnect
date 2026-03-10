@@ -1,0 +1,183 @@
+#!/bin/bash
+
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$SCRIPT_DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+HELPER_APP="$SCRIPT_DIR/GPConnectHelper.app"
+GP_SERVICE="GlobalProtect"
+CONFIG_FILE="$SCRIPT_DIR/.gpconnect_config"
+RESULT_FILE="$SCRIPT_DIR/.gpconnect_result"
+
+# --- Helper functions ---
+
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+    fi
+}
+
+save_config() {
+    echo "GP_ACCOUNT=\"$GP_ACCOUNT\"" > "$CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
+}
+
+prompt_username() {
+    read -rp "Enter your GlobalProtect username (email): " GP_ACCOUNT
+    if [ -z "$GP_ACCOUNT" ]; then
+        echo "Username cannot be empty."
+        exit 1
+    fi
+    save_config
+}
+
+prompt_password() {
+    read -rsp "Enter your GlobalProtect password: " GP_PASS
+    echo
+    if [ -z "$GP_PASS" ]; then
+        echo "Password cannot be empty."
+        exit 1
+    fi
+    # Delete existing entry first, then add new one
+    security delete-generic-password -a "$GP_ACCOUNT" -s "$GP_SERVICE" > /dev/null 2>&1
+    security add-generic-password -a "$GP_ACCOUNT" -s "$GP_SERVICE" -w "$GP_PASS" 2>/dev/null
+    echo "Password saved to Keychain."
+}
+
+update_password() {
+    read -rp "Update password? (y/n): " choice
+    if [[ "$choice" =~ ^[Yy]$ ]]; then
+        prompt_password
+        return 0
+    fi
+    return 1
+}
+
+run_app() {
+    rm -f "$RESULT_FILE"
+    echo "$1" > "$SCRIPT_DIR/.gpconnect_mode"
+    open -W -a "$HELPER_APP"
+    rm -f "$SCRIPT_DIR/.gpconnect_mode"
+    if [ -f "$RESULT_FILE" ]; then
+        cat "$RESULT_FILE"
+        rm -f "$RESULT_FILE"
+    else
+        echo "NO_RESULT"
+    fi
+}
+
+# --- Handle --help early (no config needed) ---
+
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    echo "Usage: gpconnect [OPTION]"
+    echo ""
+    echo "Options:"
+    echo "  (none)            Connect to GlobalProtect VPN"
+    echo "  -d, --disconnect  Disconnect from VPN"
+    echo "  -s, --status      Show connection status"
+    echo "  --password        Update password"
+    echo "  --username        Update username"
+    echo "  --reset           Remove all config and credentials"
+    echo "  -h, --help        Show this help"
+    exit 0
+fi
+
+# --- Initial setup ---
+
+load_config
+
+if [ -z "$GP_ACCOUNT" ]; then
+    echo "First-time setup:"
+    prompt_username
+    prompt_password
+    echo ""
+    echo "Setup complete. Run 'gpconnect' again to connect."
+    exit 0
+fi
+
+# --- Pre-flight checks ---
+
+if [ ! -d "$HELPER_APP" ]; then
+    echo "GPConnectHelper.app not found at $HELPER_APP"
+    echo "Run install.sh to set up."
+    exit 1
+fi
+
+GP_PASS=$(security find-generic-password -a "$GP_ACCOUNT" -s "$GP_SERVICE" -w 2>/dev/null)
+if [ -z "$GP_PASS" ]; then
+    echo "No password found in Keychain for $GP_ACCOUNT."
+    prompt_password
+fi
+
+# --- Handle flags ---
+
+case "$1" in
+    --password)
+        echo "Current username: $GP_ACCOUNT"
+        prompt_password
+        exit 0
+        ;;
+    --username)
+        echo "Current username: $GP_ACCOUNT"
+        prompt_username
+        echo "Username updated to: $GP_ACCOUNT"
+        echo "Do you also want to update the password?"
+        update_password
+        exit 0
+        ;;
+    -d|--disconnect)
+        RESULT=$(run_app "disconnect")
+        case "$RESULT" in
+            *NOT_CONNECTED*) echo "Already disconnected." ;;
+            *DISCONNECTED*)  echo "Disconnected." ;;
+            *)               echo "Failed to disconnect. Check GlobalProtect manually."; exit 1 ;;
+        esac
+        exit 0
+        ;;
+    -s|--status)
+        echo "$(run_app "status")"
+        exit 0
+        ;;
+    --reset)
+        echo "Resetting configuration..."
+        rm -f "$CONFIG_FILE"
+        security delete-generic-password -a "$GP_ACCOUNT" -s "$GP_SERVICE" > /dev/null 2>&1
+        echo "Config and password removed. Run 'gpconnect' to set up again."
+        exit 0
+        ;;
+esac
+
+# --- Connect ---
+
+echo "Connecting as $GP_ACCOUNT..."
+echo "Approve the Duo push on your phone when prompted."
+RESULT=$(run_app "cli")
+
+case "$RESULT" in
+    *ALREADY_CONNECTED*)
+        echo "Already connected."
+        ;;
+    *CONNECTED*)
+        echo "Connected!"
+        ;;
+    *AUTH_FAILED*)
+        echo "Authentication failed."
+        update_password && echo "Run 'gpconnect' again to retry."
+        exit 1
+        ;;
+    *TIMEOUT*)
+        echo "Timed out waiting for connection. Check GlobalProtect manually."
+        exit 1
+        ;;
+    *WINDOW_ERROR*)
+        echo "Could not open GlobalProtect window. Is GlobalProtect running?"
+        exit 1
+        ;;
+    *)
+        echo "Unexpected result: $RESULT"
+        exit 1
+        ;;
+esac
