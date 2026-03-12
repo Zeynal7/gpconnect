@@ -12,6 +12,24 @@ GP_SERVICE="GlobalProtect"
 CONFIG_FILE="$SCRIPT_DIR/.gpconnect_config"
 RESULT_FILE="$SCRIPT_DIR/.gpconnect_result"
 
+# --- Cleanup on Ctrl+C / kill ---
+
+HELPER_PID=""
+
+cleanup() {
+    if [ -n "$HELPER_PID" ]; then
+        kill "$HELPER_PID" 2>/dev/null
+        wait "$HELPER_PID" 2>/dev/null
+        HELPER_PID=""
+    fi
+    rm -f "$SCRIPT_DIR/.gpconnect_mode"
+    rm -f "$RESULT_FILE"
+    echo ""
+    exit 130
+}
+
+trap cleanup INT TERM
+
 # --- Helper functions ---
 
 load_config() {
@@ -56,22 +74,30 @@ update_password() {
     return 1
 }
 
-cleanup_mode_file() {
-    rm -f "$SCRIPT_DIR/.gpconnect_mode"
-}
+# run_app launches the helper and sets APP_RESULT (no subshell needed)
+APP_RESULT=""
 
 run_app() {
+    APP_RESULT=""
     rm -f "$RESULT_FILE"
     echo "$1" > "$SCRIPT_DIR/.gpconnect_mode"
-    trap cleanup_mode_file INT TERM EXIT
-    open -W -a "$HELPER_APP"
+    # Launch the helper and find its PID
+    open -a "$HELPER_APP"
+    sleep 0.5
+    HELPER_PID=$(pgrep -x GPConnectHelper | head -1)
+    # Wait for the helper to finish
+    if [ -n "$HELPER_PID" ]; then
+        while kill -0 "$HELPER_PID" 2>/dev/null; do
+            sleep 0.5
+        done
+    fi
+    HELPER_PID=""
     rm -f "$SCRIPT_DIR/.gpconnect_mode"
-    trap - INT TERM EXIT
     if [ -f "$RESULT_FILE" ]; then
-        cat "$RESULT_FILE"
+        APP_RESULT=$(cat "$RESULT_FILE")
         rm -f "$RESULT_FILE"
     else
-        echo "NO_RESULT"
+        APP_RESULT="NO_RESULT"
     fi
 }
 
@@ -135,8 +161,8 @@ case "$1" in
         exit 0
         ;;
     -d|--disconnect)
-        RESULT=$(run_app "disconnect")
-        case "$RESULT" in
+        run_app "disconnect"
+        case "$APP_RESULT" in
             *NOT_CONNECTED*) echo "Already disconnected." ;;
             *DISCONNECTED*)  echo "Disconnected." ;;
             *)               echo "Failed to disconnect. Check GlobalProtect manually."; exit 1 ;;
@@ -144,7 +170,8 @@ case "$1" in
         exit 0
         ;;
     -s|--status)
-        echo "$(run_app "status")"
+        run_app "status"
+        echo "$APP_RESULT"
         exit 0
         ;;
     --reset)
@@ -160,9 +187,9 @@ esac
 
 echo "Connecting as $GP_ACCOUNT..."
 echo "Approve the Duo push on your phone when prompted."
-RESULT=$(run_app "cli")
+run_app "cli"
 
-case "$RESULT" in
+case "$APP_RESULT" in
     *ALREADY_CONNECTED*)
         echo "Already connected."
         ;;
@@ -183,7 +210,7 @@ case "$RESULT" in
         exit 1
         ;;
     *)
-        echo "Unexpected result: $RESULT"
+        echo "Unexpected result: $APP_RESULT"
         exit 1
         ;;
 esac
