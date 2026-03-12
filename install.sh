@@ -21,8 +21,14 @@ cp "$SCRIPT_DIR/gpconnect" "$INSTALL_DIR/gpconnect"
 chmod +x "$INSTALL_DIR/gpconnect"
 
 # Build Swift helper app
-if [ -d "$INSTALL_DIR/GPConnectHelper.app" ]; then
-    echo "GPConnectHelper.app already exists — skipping build."
+REBUILD=false
+if [ "$1" = "--rebuild" ]; then
+    REBUILD=true
+    rm -rf "$INSTALL_DIR/GPConnectHelper.app"
+fi
+
+if [ -d "$INSTALL_DIR/GPConnectHelper.app" ] && [ "$REBUILD" = false ]; then
+    echo "GPConnectHelper.app already exists — skipping build. Use --rebuild to force."
 else
     echo "Building GPConnectHelper.app..."
     mkdir -p "$INSTALL_DIR/GPConnectHelper.app/Contents/MacOS"

@@ -16,7 +16,7 @@ RESULT_FILE="$SCRIPT_DIR/.gpconnect_result"
 
 load_config() {
     if [ -f "$CONFIG_FILE" ]; then
-        source "$CONFIG_FILE"
+        GP_ACCOUNT=$(grep '^GP_ACCOUNT=' "$CONFIG_FILE" | head -1 | sed 's/^GP_ACCOUNT=//;s/^"//;s/"$//')
     fi
 }
 
@@ -56,11 +56,17 @@ update_password() {
     return 1
 }
 
+cleanup_mode_file() {
+    rm -f "$SCRIPT_DIR/.gpconnect_mode"
+}
+
 run_app() {
     rm -f "$RESULT_FILE"
     echo "$1" > "$SCRIPT_DIR/.gpconnect_mode"
+    trap cleanup_mode_file INT TERM EXIT
     open -W -a "$HELPER_APP"
     rm -f "$SCRIPT_DIR/.gpconnect_mode"
+    trap - INT TERM EXIT
     if [ -f "$RESULT_FILE" ]; then
         cat "$RESULT_FILE"
         rm -f "$RESULT_FILE"

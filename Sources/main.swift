@@ -31,30 +31,42 @@ func runAppleScript(_ source: String) -> (Bool, String) {
     return (true, result?.stringValue ?? "")
 }
 
+func isWindowOpen() -> Bool {
+    let (ok, _) = runAppleScript("""
+        tell application "System Events"
+            tell process "GlobalProtect"
+                get window 1
+            end tell
+        end tell
+    """)
+    return ok
+}
+
 func openWindow() -> Bool {
+    // If already open, just return true
+    if isWindowOpen() { return true }
     for _ in 0..<3 {
-        let (ok, _) = runAppleScript("""
+        _ = runAppleScript("""
             tell application "System Events"
                 tell process "GlobalProtect"
                     click menu bar item 1 of menu bar 2
-                    delay 1.5
-                    get window 1
                 end tell
             end tell
         """)
-        if ok { return true }
+        Thread.sleep(forTimeInterval: 1.5)
+        if isWindowOpen() { return true }
         Thread.sleep(forTimeInterval: 0.5)
     }
     return false
 }
 
 func closeWindow() {
+    // Only click if the window is actually open
+    if !isWindowOpen() { return }
     _ = runAppleScript("""
         tell application "System Events"
             tell process "GlobalProtect"
-                try
-                    click menu bar item 1 of menu bar 2
-                end try
+                click menu bar item 1 of menu bar 2
             end tell
         end tell
     """)
@@ -151,14 +163,6 @@ if currentStatus == "Connected" {
     exit(0)
 }
 
-// Close and reopen for clean state
-closeWindow()
-Thread.sleep(forTimeInterval: 0.5)
-if !openWindow() {
-    if isCLI { writeResult("WINDOW_ERROR") }
-    exit(0)
-}
-
 // Click Connect on initial screen, fill credentials
 let escapedAccount = gpAccount.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
 let escapedPass = gpPass.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
@@ -177,9 +181,12 @@ _ = runAppleScript("""
     end tell
 """)
 
+// Close the window before waiting — don't keep toggling during Duo wait
 Thread.sleep(forTimeInterval: 2)
+closeWindow()
 
 // Wait for connection (up to 60 seconds)
+// Poll by briefly opening the window, reading status, and closing
 for _ in 0..<12 {
     Thread.sleep(forTimeInterval: 5)
     if openWindow() {

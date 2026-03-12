@@ -50,7 +50,7 @@ gpconnect -h              # Show help
 
 ## How it works
 
-1. Reads your username from `~/scripts/.gpconnect_config` (created on first run)
+1. Reads your username from `.gpconnect_config` in the install directory (created on first run)
 2. Reads your password from macOS Keychain (encrypted)
 3. Launches `GPConnectHelper.app` as an independent process (not a child of the terminal)
 4. The helper opens GlobalProtect's menu bar popup via AppleScript
