@@ -1,9 +1,11 @@
 import Foundation
 import AppKit
 
-// Handle SIGTERM/SIGINT — exit cleanly when parent bash script is interrupted
+// Handle all termination signals — exit cleanly when parent bash script is interrupted
 signal(SIGTERM) { _ in exit(0) }
 signal(SIGINT) { _ in exit(0) }
+signal(SIGHUP) { _ in exit(0) }
+signal(SIGQUIT) { _ in exit(0) }
 
 let scriptsDir = NSHomeDirectory() + "/scripts/"
 let configFile = scriptsDir + ".gpconnect_config"

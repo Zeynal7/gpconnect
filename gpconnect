@@ -28,7 +28,7 @@ cleanup() {
     exit 130
 }
 
-trap cleanup INT TERM TSTP
+trap cleanup INT TERM TSTP HUP QUIT
 
 # --- Helper functions ---
 
